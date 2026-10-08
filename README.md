@@ -86,7 +86,7 @@ averaged for cheap anti-aliasing) and one doing the filter and master
 volume. Oscillators and envelopes update every phi2 period; the filter and
 mixer produce a sample every eighth, at 123.156 kHz on PAL.
 
-Synthesised against `sky130_fd_sc_hd` the design is 66439 um2 -- 43% of a
+Synthesised against `sky130_fd_sc_hd` the design is 66566 um2 -- 43% of a
 4x2 tile. With a 1015 ns clock period there is no timing pressure.
 
 ## Running the tests

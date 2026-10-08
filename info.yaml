@@ -6,7 +6,7 @@ project:
   description:  "Drop-in digital replica of the MOS 6581/8580 SID: three voices, ADSR envelopes and the two-integrator filter, clocked from the C64 phi2 at the original rate."
   language:     "Verilog"
   clock_hz:     985248   # phi2, PAL C64. NTSC is 1022727 Hz.
-  # Synthesised against sky130_fd_sc_hd the design is 66439 um2, which is
+  # Synthesised against sky130_fd_sc_hd the design is 66566 um2, which is
   # 43% of a 4x2 tile (682.64 x 225.76 um = 154113 um2).  3x2 would be 58%
   # before clock tree and fill, which is tighter than is comfortable.
   tiles:        "4x2"

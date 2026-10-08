@@ -97,7 +97,7 @@ module sid_audio (
   // Q13.6 so they settle on the target exactly rather than parking an
   // LSB short of it.  The time constant is 64 phi2 periods, about 65 us.
   reg [20:0] w0_lag0, w0_lag1;
-  wire [13:0] w0_smooth = w0_lag1[20:6];
+  wire [13:0] w0_smooth = w0_lag1[19:6];
 
   always @(posedge clk) begin
     if (!rst_n) begin
@@ -105,7 +105,7 @@ module sid_audio (
       w0_lag1 <= 21'd0;
     end else begin
       w0_lag0 <= w0_lag0 - (w0_lag0 >> 6) + {7'd0, w0};
-      w0_lag1 <= w0_lag1 - (w0_lag1 >> 6) + {7'd0, w0_lag0[20:6]};
+      w0_lag1 <= w0_lag1 - (w0_lag1 >> 6) + {7'd0, w0_lag0[19:6]};
     end
   end
 
@@ -169,14 +169,18 @@ module sid_audio (
   // A 1-bit sigma-delta input pin: count the ones over the frame and
   // centre the result, giving nine levels per filter sample.
   reg [3:0] ext_cnt;
-  reg signed [12:0] ext_val;
+  reg signed [13:0] ext_val;
+
+  // Centre the count of ones (0..8 becomes -4..+4) and scale by 512, which
+  // is exactly 14 bits -- hence the width of ext_val.
+  wire signed [4:0] ext_c = $signed({1'b0, ext_cnt}) - 5'sd4;
 
   always @(posedge clk) begin
     if (!rst_n) begin
       ext_cnt <= 4'd0;
-      ext_val <= 13'sd0;
+      ext_val <= 14'sd0;
     end else if (st == 3'd7) begin
-      ext_val <= ($signed({1'b0, ext_cnt}) - 5'sd4) <<< 9;
+      ext_val <= $signed({ext_c, 9'd0});
       ext_cnt <= {3'd0, ext_in};
     end else begin
       ext_cnt <= ext_cnt + {3'd0, ext_in};
@@ -194,7 +198,7 @@ module sid_audio (
   wire signed [15:0] sum_filt = (filt[0] ? {{2{vs1[13]}}, vs1} : 16'sd0)
                               + (filt[1] ? {{2{vs2[13]}}, vs2} : 16'sd0)
                               + (filt[2] ? {{2{vs3[13]}}, vs3} : 16'sd0)
-                              + (filt[3] ? {{3{ext_val[12]}}, ext_val} : 16'sd0);
+                              + (filt[3] ? {{2{ext_val[13]}}, ext_val} : 16'sd0);
 
   reg signed [15:0] r_unfilt, r_filt;
 
@@ -203,18 +207,20 @@ module sid_audio (
 
   reg  signed [17:0] mulf_a;
   reg         [13:0] mulf_b;
-  reg  signed [31:0] prodf;
+  reg  signed [32:0] prodf;      // 18 + 15 bits, the exact product width
 
   always @(posedge clk) begin
-    if (!rst_n) prodf <= 32'sd0;
+    if (!rst_n) prodf <= 33'sd0;
     else        prodf <= mulf_a * $signed({1'b0, mulf_b});
   end
 
   // Arithmetic shifts, so the sign of the product survives.  24 bits is
   // wide enough for the worst case (a fully clamped state times the
   // largest 1/Q coefficient) and clamp18() brings it back in range.
-  wire signed [23:0] p_w0 = prodf >>> 14;   // Q0.14 coefficient
-  wire signed [23:0] p_q  = prodf >>> 12;   // Q1.12 coefficient
+  // Taken as explicit sign-extending slices rather than >>>, so the
+  // narrowing is stated rather than implied.
+  wire signed [23:0] p_w0 = {{5{prodf[32]}}, prodf[32:14]};   // Q0.14
+  wire signed [23:0] p_q  = {{3{prodf[32]}}, prodf[32:12]};   // Q1.12
 
   function signed [17:0] clamp18(input signed [23:0] v);
     clamp18 = (v >  24'sd131071) ?  18'sd131071 :
@@ -231,7 +237,7 @@ module sid_audio (
                            + (mode[1] ? x_band : 24'sd0)
                            + (mode[2] ? x_high : 24'sd0);
 
-  wire signed [31:0] scaled = prodf >>> 4;   // total * vol / 16
+  wire signed [28:0] scaled = prodf[32:4];           // total * vol / 16
 
   always @(posedge clk) begin
     if (!rst_n) begin
@@ -253,8 +259,8 @@ module sid_audio (
         end
 
         3'd1: begin                       // volume product from cycle 7
-          audio_o <= (scaled >  32'sd32767) ?  16'sd32767 :
-                     (scaled < -32'sd32768) ? -16'sd32768 :
+          audio_o <= (scaled >  29'sd32767) ?  16'sd32767 :
+                     (scaled < -29'sd32768) ? -16'sd32768 :
                      scaled[15:0];
         end
 

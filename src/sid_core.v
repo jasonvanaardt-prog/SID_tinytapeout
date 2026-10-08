@@ -102,6 +102,7 @@ module sid_core (
           3'd4: r_ctrl[vsel] <= data_i;
           3'd5: r_ad[vsel]   <= data_i;
           3'd6: r_sr[vsel]   <= data_i;
+          default: ;                    // a voice block is only 7 registers
         endcase
       end else begin
         case (addr)
