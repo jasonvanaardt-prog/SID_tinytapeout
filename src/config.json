@@ -13,7 +13,10 @@
 
   "//": "PL_TARGET_DENSITY_PCT - You can increase this if Global Placement fails with error GPL-0302.",
   "//": "Users have reported that values up to 80 worked well for them.",
-  "PL_TARGET_DENSITY_PCT": 60,
+  "//": "This design needs 75: at 60 global placement fails with GPL-0302, because",
+  "//": "the standard cells come to ~84000 um2 against a 4x2 core of ~149000 um2.",
+  "//": "At 75 it places and routes with 0 DRC, 0 LVS and no setup or hold violations.",
+  "PL_TARGET_DENSITY_PCT": 75,
 
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
   "//": "The value is in nanoseconds. This design is clocked from the C64's phi2,",
