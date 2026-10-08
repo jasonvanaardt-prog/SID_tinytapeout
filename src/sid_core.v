@@ -4,19 +4,32 @@
  * SPDX-FileCopyrightText: 2026 Jason van Aardt
  * SPDX-License-Identifier: CERN-OHL-S-2.0
  *
- * Implements the 29-register map of the original chip, the phi2 bus
- * protocol, the three voices with their sync/ring-modulation chain, and
- * the OSC3 / ENV3 read-back registers.
+ * clk is phi2.  The whole chip runs from the host's phi2 clock at the
+ * original SID rate -- 985248 Hz on a PAL C64, 1022727 Hz on NTSC -- so
+ * pitches, envelope times and filter sweeps come out at exactly the
+ * frequencies the original produces, with no scaling anywhere.
+ *
+ * Bus protocol, matching the original chip:
+ *
+ *   write  data is latched on the falling edge of phi2, so the register
+ *          file is clocked on the negative edge of clk.  That is a
+ *          half-cycle path against the positive-edge logic that reads
+ *          it -- roughly 500 ns of margin at 1 MHz.
+ *
+ *   read   the data bus is driven while /CS is low and R//W is high.
+ *          Note that /CS is expected to be phi2-qualified, which it is
+ *          on a C64: the PLA only asserts the SID's /CS during phi2
+ *          high for an address in $D400-$D7FF.  A microcontroller
+ *          driving this tile must do the same and assert /CS only for
+ *          the duration of an access.
  */
 
 `default_nettype none
 
 module sid_core (
-    input  wire       clk,
+    input  wire       clk,          // phi2
     input  wire       rst_n,        // /RES
 
-    // phi2 bus, already synchronised to clk
-    input  wire       phi2,
     input  wire       cs_n,         // /CS
     input  wire       rw,           // R//W  (1 = read)
     input  wire [4:0] addr,         // A0..A4
@@ -24,24 +37,13 @@ module sid_core (
     output wire [7:0] data_o,       // D0..D7 out
     output wire       data_oe,      // drive the data bus
 
-    output wire       tick,         // one clk pulse per phi2 period
+    input  wire       ext_in,       // 1-bit sigma-delta EXT IN
+
     output wire signed [15:0] audio_o,
+    output wire       frame_tick,
     output wire       osc3_msb,
     output wire       env3_active
 );
-
-  // ------------------------------------------------------- phi2 edges
-  reg phi2_d;
-  always @(posedge clk) begin
-    if (!rst_n) phi2_d <= 1'b0;
-    else        phi2_d <= phi2;
-  end
-
-  wire phi2_rise = phi2 & ~phi2_d;
-  wire phi2_fall = ~phi2 & phi2_d;
-
-  // The oscillators and envelopes advance once per phi2 period.
-  assign tick = phi2_rise;
 
   // --------------------------------------------------------- registers
   reg [15:0] r_freq [0:2];
@@ -71,10 +73,11 @@ module sid_core (
   wire [4:0] roff = addr - vbase;
   wire [2:0] rsel = roff[2:0];
 
-  wire wr = phi2_fall & ~cs_n & ~rw;
+  wire wr = ~cs_n & ~rw;
 
+  // Clocked on the falling edge of phi2, as on the original chip.
   integer i;
-  always @(posedge clk) begin
+  always @(negedge clk) begin
     if (!rst_n) begin
       for (i = 0; i < 3; i = i + 1) begin
         r_freq[i] <= 16'd0;
@@ -122,43 +125,39 @@ module sid_core (
 
   // Sync and ring modulation take their source from the previous voice,
   // wrapping around: 1<-3, 2<-1, 3<-2.
-  wire [23:0] src0 = acc[2];
-  wire [23:0] src1 = acc[0];
-  wire [23:0] src2 = acc[1];
-
   sid_voice u_v0 (
-      .clk(clk), .rst_n(rst_n), .tick(tick),
+      .clk(clk), .rst_n(rst_n),
       .freq(r_freq[0]), .pw(r_pw[0]), .ctrl(r_ctrl[0]),
-      .src_acc(src0), .acc_o(acc[0]), .wave_o(wave[0]));
+      .src_acc(acc[2]), .acc_o(acc[0]), .wave_o(wave[0]));
 
   sid_voice u_v1 (
-      .clk(clk), .rst_n(rst_n), .tick(tick),
+      .clk(clk), .rst_n(rst_n),
       .freq(r_freq[1]), .pw(r_pw[1]), .ctrl(r_ctrl[1]),
-      .src_acc(src1), .acc_o(acc[1]), .wave_o(wave[1]));
+      .src_acc(acc[0]), .acc_o(acc[1]), .wave_o(wave[1]));
 
   sid_voice u_v2 (
-      .clk(clk), .rst_n(rst_n), .tick(tick),
+      .clk(clk), .rst_n(rst_n),
       .freq(r_freq[2]), .pw(r_pw[2]), .ctrl(r_ctrl[2]),
-      .src_acc(src2), .acc_o(acc[2]), .wave_o(wave[2]));
+      .src_acc(acc[1]), .acc_o(acc[2]), .wave_o(wave[2]));
 
   sid_envelope u_e0 (
-      .clk(clk), .rst_n(rst_n), .tick(tick), .gate(r_ctrl[0][0]),
+      .clk(clk), .rst_n(rst_n), .gate(r_ctrl[0][0]),
       .attack(r_ad[0][7:4]), .decay(r_ad[0][3:0]),
       .sustain(r_sr[0][7:4]), .release_(r_sr[0][3:0]), .env_o(env[0]));
 
   sid_envelope u_e1 (
-      .clk(clk), .rst_n(rst_n), .tick(tick), .gate(r_ctrl[1][0]),
+      .clk(clk), .rst_n(rst_n), .gate(r_ctrl[1][0]),
       .attack(r_ad[1][7:4]), .decay(r_ad[1][3:0]),
       .sustain(r_sr[1][7:4]), .release_(r_sr[1][3:0]), .env_o(env[1]));
 
   sid_envelope u_e2 (
-      .clk(clk), .rst_n(rst_n), .tick(tick), .gate(r_ctrl[2][0]),
+      .clk(clk), .rst_n(rst_n), .gate(r_ctrl[2][0]),
       .attack(r_ad[2][7:4]), .decay(r_ad[2][3:0]),
       .sustain(r_sr[2][7:4]), .release_(r_sr[2][3:0]), .env_o(env[2]));
 
   // ------------------------------------------------------------- audio
   sid_audio u_audio (
-      .clk(clk), .rst_n(rst_n), .tick(tick),
+      .clk(clk), .rst_n(rst_n),
       .wave1(wave[0]), .wave2(wave[1]), .wave3(wave[2]),
       .env1(env[0]),   .env2(env[1]),   .env3(env[2]),
       .fc(r_fc),
@@ -168,7 +167,9 @@ module sid_core (
       .mode(r_modevol[6:4]),
       .vol(r_modevol[3:0]),
       .is_6581(is_6581),
-      .audio_o(audio_o));
+      .ext_in(ext_in),
+      .audio_o(audio_o),
+      .frame_tick(frame_tick));
 
   assign osc3_msb    = acc[2][23];
   assign env3_active = |env[2];
@@ -188,6 +189,6 @@ module sid_core (
   end
 
   assign data_o  = rdata;
-  assign data_oe = phi2 & ~cs_n & rw;
+  assign data_oe = ~cs_n & rw;
 
 endmodule

@@ -7,8 +7,8 @@
  * One voice: 24-bit phase accumulator, saw/triangle/pulse/noise waveform
  * generators, ring modulation, oscillator sync and the TEST bit.
  *
- * Everything advances on `tick` (one phi2 period), so the oscillator is
- * cycle-accurate with respect to the original chip's phi2 clock.
+ * clk is phi2, so the accumulator advances once per phi2 period and the
+ * oscillator is cycle-accurate with the original chip.
  */
 
 `default_nettype none
@@ -16,7 +16,6 @@
 module sid_voice (
     input  wire        clk,
     input  wire        rst_n,
-    input  wire        tick,        // one phi2 period
 
     input  wire [15:0] freq,        // frequency
     input  wire [11:0] pw,          // pulse width
@@ -49,7 +48,7 @@ module sid_voice (
     if (!rst_n) begin
       acc       <= 24'd0;
       src_msb_d <= 1'b0;
-    end else if (tick) begin
+    end else begin
       src_msb_d <= src_acc[23];
       if (test || (sync_en && src_msb_rise))
         acc <= 24'd0;
@@ -67,7 +66,7 @@ module sid_voice (
     if (!rst_n) begin
       lfsr    <= 23'h7fffff;
       acc19_d <= 1'b0;
-    end else if (tick) begin
+    end else begin
       acc19_d <= acc[19];
       // TEST forces ones into the shift register, as on the real chip.
       if ((acc[19] & ~acc19_d) || test)

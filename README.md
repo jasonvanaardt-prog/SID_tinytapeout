@@ -1,36 +1,43 @@
 # SID 6581 / 8580 Replica -- Tiny Tapeout
 
 A digital replica of the MOS Technology 6581/8580 SID, the Commodore 64
-sound chip, as a Tiny Tapeout tile.
+sound chip, as a Tiny Tapeout tile -- built as a drop-in replacement.
 
-The host interface is the original chip's: an 8-bit bidirectional data
-bus, five address lines, `/CS`, `R//W`, `phi2` and `/RES`, with the same
-cycle timing and the same 29-register map. Software written for a real SID
-drives this tile unchanged.
+**One clock, and it is phi2.** The host's phi2 is the tile's `clk`, so the
+whole design runs at the original SID rate (985248 Hz PAL, 1022727 Hz
+NTSC) with no second oscillator, PLL or clock division anywhere. Pitches
+and envelope times therefore come out at exactly the real chip's
+frequencies, and PAL/NTSC is tracked automatically. An adapter board needs
+no crystal.
+
+The rest of the interface is the original's too: an 8-bit bidirectional
+data bus, five address lines, `/CS`, `R//W` and `/RES`, the same 29-register
+map, and writes latched on the falling edge of phi2. Software written for
+a real SID drives this tile unchanged.
 
 - `src/` -- the RTL
 - `test/` -- cocotb test suite driving the phi2 bus
 - `docs/info.md` -- full documentation, pinout, register map and the
   external-component discussion
-- `info.yaml` -- Tiny Tapeout project metadata
+- `info.yaml`, `src/config.json` -- Tiny Tapeout and OpenLane configuration
 
 ## What is implemented
 
 | Block | Status |
 |---|---|
-| 3 x 24-bit phase accumulator oscillator | yes |
+| 3 x 24-bit phase accumulator oscillator | yes, advanced every phi2 period |
 | Sawtooth, triangle, pulse, noise (23-bit LFSR) | yes |
 | Combined waveforms (wire-AND) | approximated |
 | Ring modulation, oscillator sync, TEST bit | yes |
 | 3 x ADSR envelope with the hardware rate table | yes |
 | Exponential decay/release divider | yes |
-| Multimode filter (LP / BP / HP, simultaneous) | yes, digital SVF |
+| Multimode filter (LP / BP / HP, simultaneous) | yes, digital SVF at phi2/8 |
 | 6581 non-linear cutoff curve | 8-segment piecewise-linear |
 | 8580 linear cutoff curve | yes (register 1F bit 0) |
 | Per-voice filter routing, 3 OFF, master volume | yes |
 | OSC3 / ENV3 read-back | yes |
+| EXT IN | yes, as a 1-bit sigma-delta input |
 | POT X / POT Y | register-level only (no analog pin) |
-| EXT IN | not available (no analog pin) |
 | 6581 analog non-linearities and distortion | not modelled |
 
 ## Pinout
@@ -39,17 +46,14 @@ drives this tile unchanged.
 |---|---|---|
 | 15-22 | D0..D7 | `uio[0..7]` |
 | 9-13 | A0..A4 | `ui[0..4]` |
-| 8 | `/CS` | `ui[5]` |
+| 8 | `/CS` | `ui[5]` (must be phi2-qualified) |
 | 7 | `R//W` | `ui[6]` |
-| 6 | `phi2` | `ui[7]` |
+| 6 | `phi2` | `clk` |
 | 5 | `/RES` | `rst_n` |
-| 27 | AUDIO OUT | `uo[0]` (sigma-delta; `uo[1]` PWM, `uo[2..4]` I2S) |
+| 26 | EXT IN | `ui[7]` (1-bit stream) |
+| 27 | AUDIO OUT | `uo[0]` sigma-delta; `uo[1..3]` I2S |
 | 1-4 | CAP1A/B, CAP2A/B | not needed, the filter is digital |
-| 23, 24, 26 | POT Y, POT X, EXT IN | no analog pins available |
-
-`clk` is the tile's system clock and must run at least ~16x `phi2`; the
-audio pipeline time-shares one multiplier over 15 cycles per `phi2`
-period. The design point is 50 MHz `clk` with a 1 MHz `phi2`.
+| 23, 24 | POT Y, POT X | no analog pins available |
 
 ## External components
 
@@ -68,8 +72,22 @@ uo[0] ──[ 1k ]──┬──[ 1k ]──┬──[ 10uF ]──> line out
                GND        GND
 ```
 
-Or skip the analog work entirely and feed `uo[2..4]` into an I2S DAC.
-See `docs/info.md` for the full discussion.
+At the phi2 clock rate that output is good for about 59 dB in the audio
+band, which is in the same territory as a real 6581 in a C64. For better
+than that, feed `uo[1..3]` into an I2S DAC. `docs/info.md` has the full
+discussion, including why there is no PWM output.
+
+## Implementation notes
+
+Running from phi2 alone means one clock cycle per phi2 period, so the
+audio arithmetic is an 8-cycle frame driving two small multipliers: one
+doing voice amplitudes (round robin, two samples per voice per frame,
+averaged for cheap anti-aliasing) and one doing the filter and master
+volume. Oscillators and envelopes update every phi2 period; the filter and
+mixer produce a sample every eighth, at 123.156 kHz on PAL.
+
+Synthesised against `sky130_fd_sc_hd` the design is 66439 um2 -- 43% of a
+4x2 tile. With a 1015 ns clock period there is no timing pressure.
 
 ## Running the tests
 
@@ -77,20 +95,23 @@ See `docs/info.md` for the full discussion.
 cd test && make
 ```
 
-Needs `iverilog` and `cocotb`. The 16 cases drive the phi2 bus the way a
-6502 would and check the bus protocol, the oscillators and their sync and
-ring-modulation chain, the ADSR envelope through all its phases, the
-filter responses, voice routing, master volume and the I2S stream.
+Needs `iverilog` and the pinned `cocotb` from `test/requirements.txt`. The
+20 cases drive the phi2 bus the way a 6502 would and check the bus
+protocol and single-cycle writes, all four waveforms, sync and ring
+modulation, TEST, the ADSR through every phase *and* against the
+hardware's attack timing, filter responses, filter stability across the
+cutoff and resonance ranges, EXT IN routing, voice routing, master volume
+and the decoded I2S stream.
 
-To hear it, render a short demo to a WAV file:
+To hear it, render a demo to a WAV file:
 
 ```bash
-cd test && make record          # or DURATION_MS=500 make record
+cd test && make record          # or DURATION_MS=3000 make record
 ```
 
 That plays a four-note figure with a filter sweep by writing registers
-over the phi2 bus, then captures the mixer output to `test/sid_demo.wav`.
-It takes a few minutes -- the simulation runs the full 1 MHz phi2 clock.
+over the phi2 bus, then captures the mixer output to `test/sid_demo.wav`
+at the 123.156 kHz filter rate.
 
 ## Licence
 

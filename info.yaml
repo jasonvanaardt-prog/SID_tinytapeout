@@ -3,13 +3,13 @@ project:
   title:        "SID 6581 / 8580 Replica"
   author:       "Jason van Aardt"
   discord:      ""
-  description:  "Digital replica of the MOS 6581/8580 SID: three voices, ADSR envelopes and the two-integrator filter, on the original chip's phi2 bus pinout."
+  description:  "Drop-in digital replica of the MOS 6581/8580 SID: three voices, ADSR envelopes and the two-integrator filter, clocked from the C64 phi2 at the original rate."
   language:     "Verilog"
-  clock_hz:     50000000
-  # ~7.4k generic cells / 834 flip-flops after synthesis.  6x2 leaves
-  # comfortable routing headroom; check the utilisation the gds workflow
-  # reports and drop to 4x2 if it fits.
-  tiles:        "6x2"
+  clock_hz:     985248   # phi2, PAL C64. NTSC is 1022727 Hz.
+  # Synthesised against sky130_fd_sc_hd the design is 66439 um2, which is
+  # 43% of a 4x2 tile (682.64 x 225.76 um = 154113 um2).  3x2 would be 58%
+  # before clock tree and fill, which is tighter than is comfortable.
+  tiles:        "4x2"
   top_module:   "tt_um_sid6581"
 
   source_files:
@@ -30,18 +30,18 @@ pinout:
   ui[2]: "A2 - address bit 2 (6581 pin 11)"
   ui[3]: "A3 - address bit 3 (6581 pin 12)"
   ui[4]: "A4 - address bit 4 (6581 pin 13)"
-  ui[5]: "/CS - chip select, active low (6581 pin 8)"
+  ui[5]: "/CS - chip select, active low, must be phi2-qualified (6581 pin 8)"
   ui[6]: "R//W - high to read, low to write (6581 pin 7)"
-  ui[7]: "phi2 - bus and oscillator clock, nominally 1 MHz (6581 pin 6)"
+  ui[7]: "EXT IN - 1-bit sigma-delta audio input into the filter (6581 pin 26)"
 
-  uo[0]: "AUDIO OUT - 1-bit sigma-delta, needs an RC reconstruction filter (6581 pin 27)"
-  uo[1]: "AUDIO PWM - 8-bit PWM alternative to uo[0]"
-  uo[2]: "I2S SD - serial audio data"
-  uo[3]: "I2S WS - word select"
-  uo[4]: "I2S SCK - bit clock"
+  uo[0]: "AUDIO OUT - 2nd-order sigma-delta, needs an RC reconstruction filter (6581 pin 27)"
+  uo[1]: "I2S SD - serial audio data"
+  uo[2]: "I2S WS - word select"
+  uo[3]: "I2S SCK - bit clock (= phi2)"
+  uo[4]: "Sample strobe - one pulse per filter sample (phi2/8)"
   uo[5]: "OSC3 MSB - voice 3 oscillator MSB"
   uo[6]: "ENV3 active - voice 3 envelope is non-zero"
-  uo[7]: "phi2 sample strobe"
+  uo[7]: ""
 
   uio[0]: "D0 - data bus bit 0 (6581 pin 15)"
   uio[1]: "D1 - data bus bit 1 (6581 pin 16)"

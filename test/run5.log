@@ -1,0 +1,108 @@
+rm -f results.xml
+"make" -f Makefile results.xml
+make[1]: Entering directory '/home/van496/project/SID_tinytapeout/test'
+mkdir -p sim_build/rtl
+/usr/bin/iverilog -o sim_build/rtl/sim.vvp -D COCOTB_SIM=1 -s tb -g2012 -f sim_build/rtl/cmds.f  /home/van496/project/SID_tinytapeout/test/../src/sid_voice.v /home/van496/project/SID_tinytapeout/test/../src/sid_envelope.v /home/van496/project/SID_tinytapeout/test/../src/sid_fc_curve.v /home/van496/project/SID_tinytapeout/test/../src/sid_q_table.v /home/van496/project/SID_tinytapeout/test/../src/sid_audio.v /home/van496/project/SID_tinytapeout/test/../src/sid_dac.v /home/van496/project/SID_tinytapeout/test/../src/sid_core.v /home/van496/project/SID_tinytapeout/test/../src/project.v /home/van496/project/SID_tinytapeout/test/tb.v
+rm -f results.xml
+MODULE=test TESTCASE= TOPLEVEL=tb TOPLEVEL_LANG=verilog \
+         /usr/bin/vvp -M /home/van496/miniconda3/lib/python3.10/site-packages/cocotb/libs -m libcocotbvpi_icarus   sim_build/rtl/sim.vvp +vcd 
+     -.--ns INFO     gpi                                ..mbed/gpi_embed.cpp:79   in set_program_name_in_venv        Did not detect Python virtual environment. Using system-wide Python interpreter
+     -.--ns INFO     gpi                                ../gpi/GpiCommon.cpp:101  in gpi_print_registered_impl       VPI registered
+     0.00ns INFO     cocotb                             Running on Icarus Verilog version 11.0 (stable)
+     0.00ns INFO     cocotb                             Running tests with cocotb v1.9.2 from /home/van496/miniconda3/lib/python3.10/site-packages/cocotb
+     0.00ns INFO     cocotb                             Seeding Python random module with 1791435850
+     0.00ns INFO     cocotb.regression                  pytest not found, install it to enable better AssertionError messages
+     0.00ns INFO     cocotb.regression                  Found test test.test_reset_state
+     0.00ns INFO     cocotb.regression                  Found test test.test_write_only_registers_read_zero
+     0.00ns INFO     cocotb.regression                  Found test test.test_pot_registers
+     0.00ns INFO     cocotb.regression                  Found test test.test_sawtooth_ramps
+     0.00ns INFO     cocotb.regression                  Found test test.test_test_bit_holds_pulse_high
+     0.00ns INFO     cocotb.regression                  Found test test.test_triangle_is_folded
+     0.00ns INFO     cocotb.regression                  Found test test.test_noise_is_random
+     0.00ns INFO     cocotb.regression                  Found test test.test_envelope_attack_decay_release
+     0.00ns INFO     cocotb.regression                  Found test test.test_audio_output_and_volume
+     0.00ns INFO     cocotb.regression                  Found test test.test_pdm_output_toggles
+     0.00ns INFO     cocotb.regression                  Found test test.test_lowpass_attenuates
+     0.00ns INFO     cocotb.regression                  Found test test.test_highpass_passes_high_cutoff
+     0.00ns INFO     cocotb.regression                  Found test test.test_voice3_off
+     0.00ns INFO     cocotb.regression                  Found test test.test_oscillator_sync
+     0.00ns INFO     cocotb.regression                  Found test test.test_model_select
+     0.00ns INFO     cocotb.regression                  Found test test.test_i2s_stream
+     0.00ns INFO     cocotb.regression                  running test_reset_state (1/16)
+                                                          After /RES the oscillators, envelopes and output are all cleared.
+   280.00ns INFO     cocotb.tb                          checking reset state
+204280.00ns INFO     cocotb.regression                  test_reset_state passed
+204280.00ns INFO     cocotb.regression                  running test_write_only_registers_read_zero (2/16)
+                                                          Registers 00..18 are write-only on the real chip.
+218580.00ns INFO     cocotb.regression                  test_write_only_registers_read_zero passed
+218580.00ns INFO     cocotb.regression                  running test_pot_registers (3/16)
+                                                          POT X/Y read back the values loaded through the 1D/1E extension.
+230880.00ns INFO     cocotb.regression                  test_pot_registers passed
+230880.00ns INFO     cocotb.regression                  running test_sawtooth_ramps (4/16)
+                                                          OSC3 follows the top of voice 3's phase accumulator.
+1031180.00ns INFO     cocotb.regression                  test_sawtooth_ramps passed
+1031180.00ns INFO     cocotb.regression                  running test_test_bit_holds_pulse_high (5/16)
+                                                           TEST zeroes the accumulator and forces the pulse output high.
+1909480.00ns INFO     cocotb.regression                  test_test_bit_holds_pulse_high passed
+1909480.00ns INFO     cocotb.regression                  running test_triangle_is_folded (6/16)
+                                                           The triangle output folds, so it never stays on a single ramp.
+2635780.01ns INFO     cocotb.regression                  test_triangle_is_folded passed
+2635780.01ns INFO     cocotb.regression                  running test_noise_is_random (7/16)
+                                                           The 23-bit LFSR produces a spread of values, not a ramp.
+3698080.01ns INFO     cocotb.regression                  test_noise_is_random passed
+3698080.01ns INFO     cocotb.regression                  running test_envelope_attack_decay_release (8/16)
+                                                           Gate drives the ADSR through attack, decay to sustain, then release.
+16912380.01ns INFO     cocotb.regression                  test_envelope_attack_decay_release passed
+16912380.01ns INFO     cocotb.regression                  running test_audio_output_and_volume (9/16)
+                                                            A gated voice produces a moving output that scales with volume.
+22026680.01ns INFO     cocotb.regression                  test_audio_output_and_volume passed
+22026680.01ns INFO     cocotb.regression                  running test_pdm_output_toggles (10/16)
+                                                            The sigma-delta AUDIO OUT pin carries a varying duty cycle.
+25118980.01ns INFO     cocotb.regression                  test_pdm_output_toggles passed
+25118980.01ns INFO     cocotb.regression                  running test_lowpass_attenuates (11/16)
+                                                            Routing a voice through a low cutoff low-pass reduces its level.
+35039280.01ns INFO     cocotb.tb                          dry span 3823, low-pass span 341
+35039280.01ns INFO     cocotb.regression                  test_lowpass_attenuates passed
+35039280.01ns INFO     cocotb.regression                  running test_highpass_passes_high_cutoff (12/16)
+                                                            High-pass with the cutoff at the bottom passes the signal through.
+40257580.01ns INFO     cocotb.regression                  test_highpass_passes_high_cutoff passed
+40257580.01ns INFO     cocotb.regression                  running test_voice3_off (13/16)
+                                                            Bit 7 of MODE/VOL silences voice 3 only while it is unfiltered.
+46471880.01ns INFO     cocotb.regression                  test_voice3_off passed
+46471880.01ns INFO     cocotb.regression                  running test_oscillator_sync (14/16)
+                                                            SYNC resets a voice's accumulator from the previous voice's MSB.
+55446180.01ns INFO     cocotb.regression                  test_oscillator_sync passed
+55446180.01ns INFO     cocotb.regression                  running test_model_select (15/16)
+                                                            The 1F extension switches between the 6581 and 8580 cutoff laws.
+55462480.01ns INFO     cocotb.tb                          w0 6581=535 8580=2560
+55462480.02ns INFO     cocotb.regression                  test_model_select passed
+55462480.02ns INFO     cocotb.regression                  running test_i2s_stream (16/16)
+                                                            The I2S output carries the mixer sample, MSB first, one bit after WS.
+58470780.02ns INFO     cocotb.tb                          audio_o=1911, expecting I2S word 0x8777
+58483480.02ns INFO     cocotb.regression                  test_i2s_stream passed
+58483480.02ns INFO     cocotb.regression                  **************************************************************************************************
+                                                          ** TEST                                      STATUS  SIM TIME (ns)  REAL TIME (s)  RATIO (ns/s) **
+                                                          **************************************************************************************************
+                                                          ** test.test_reset_state                      PASS      204280.00           0.71     287468.08  **
+                                                          ** test.test_write_only_registers_read_zero   PASS       14300.00           0.05     300275.61  **
+                                                          ** test.test_pot_registers                    PASS       12300.00           0.04     306759.80  **
+                                                          ** test.test_sawtooth_ramps                   PASS      800300.00           2.48     323144.55  **
+                                                          ** test.test_test_bit_holds_pulse_high        PASS      878300.00           2.72     322654.34  **
+                                                          ** test.test_triangle_is_folded               PASS      726300.00           2.24     323558.19  **
+                                                          ** test.test_noise_is_random                  PASS     1062300.00           3.27     324778.18  **
+                                                          ** test.test_envelope_attack_decay_release    PASS    13214300.00          39.41     335302.82  **
+                                                          ** test.test_audio_output_and_volume          PASS     5114300.00          15.54     329114.38  **
+                                                          ** test.test_pdm_output_toggles               PASS     3092300.00           9.40     329120.13  **
+                                                          ** test.test_lowpass_attenuates               PASS     9920300.00          30.50     325270.05  **
+                                                          ** test.test_highpass_passes_high_cutoff      PASS     5218300.00          16.04     325306.63  **
+                                                          ** test.test_voice3_off                       PASS     6214300.00          19.55     317929.49  **
+                                                          ** test.test_oscillator_sync                  PASS     8974300.00          27.68     324238.87  **
+                                                          ** test.test_model_select                     PASS       16300.00           0.05     317156.28  **
+                                                          ** test.test_i2s_stream                       PASS     3021000.00           9.19     328863.20  **
+                                                          **************************************************************************************************
+                                                          ** TESTS=16 PASS=16 FAIL=0 SKIP=0                     58483480.02         178.87     326952.95  **
+                                                          **************************************************************************************************
+                                                          
+VCD info: dumpfile tb.vcd opened for output.
+make[1]: Leaving directory '/home/van496/project/SID_tinytapeout/test'
+EXIT=0

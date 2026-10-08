@@ -1,6 +1,9 @@
 """
 Functional tests for the tt_um_sid6581 Tiny Tapeout tile.
 
+clk is phi2, driven here at the PAL C64 rate of 985248 Hz, so every
+timing figure these tests assert is the figure the real chip produces.
+
 SPDX-FileCopyrightText: 2026 Jason van Aardt
 SPDX-License-Identifier: CERN-OHL-S-2.0
 """
@@ -11,36 +14,28 @@ from cocotb.triggers import RisingEdge
 
 import sid
 from sid import (CTRL, MODEVOL, RESFILT, OSC3, ENV3, POTX, POTY,
-                 POTX_SET, POTY_SET, CFG,
+                 POTX_SET, POTY_SET, CFG, FCLO, FCHI,
                  NOISE, PULSE, SAW, TRI, TEST, SYNC, GATE,
-                 LP, HP, VOICE3OFF)
+                 FILTEX, FILT1, LP, HP, BP, VOICE3OFF,
+                 PHI2_PAL, FRAME)
 
-CLK_NS = 20          # 50 MHz system clock
-CLK_PER_PHI2 = 50    # 1 MHz phi2
+# One phi2 period in picoseconds, at the PAL rate.  Rounded to an even
+# number of simulator steps, which is what cocotb's Clock requires when
+# no explicit high time is given; the 0.9 ppm error is irrelevant.
+PERIOD_PS = 2 * round(1e12 / PHI2_PAL / 2)
 
 
 async def start(dut):
-    cocotb.start_soon(Clock(dut.clk, CLK_NS, units="ns").start())
-    s = sid.Sid(dut, CLK_PER_PHI2)
+    cocotb.start_soon(Clock(dut.clk, PERIOD_PS, unit="ps").start())
+    s = sid.Sid(dut)
     await s.reset()
     return s
-
-
-async def collect(s, periods, every=1):
-    """Run phi2 and return the audio samples produced."""
-    out = []
-    for i in range(periods):
-        await s.idle(1)
-        if i % every == 0:
-            out.append(s.audio())
-    return out
 
 
 @cocotb.test()
 async def test_reset_state(dut):
     """After /RES the oscillators, envelopes and output are all cleared."""
     s = await start(dut)
-    dut._log.info("checking reset state")
 
     assert await s.read(OSC3) == 0x00, "OSC3 should be 0 after reset"
     assert await s.read(ENV3) == 0x00, "ENV3 should be 0 after reset"
@@ -76,6 +71,15 @@ async def test_pot_registers(dut):
 
 
 @cocotb.test()
+async def test_single_cycle_write(dut):
+    """A write must take effect from one phi2 period, as on the real chip."""
+    s = await start(dut)
+    await s.write(POTX_SET, 0x3C)
+    # No idling in between: the very next cycle must already see it.
+    assert await s.read(POTX) == 0x3C, "the write did not land in one period"
+
+
+@cocotb.test()
 async def test_sawtooth_ramps(dut):
     """OSC3 follows the top of voice 3's phase accumulator."""
     s = await start(dut)
@@ -87,7 +91,6 @@ async def test_sawtooth_ramps(dut):
     for _ in range(12):
         await s.idle(64)
         now = await s.read(OSC3)
-        # Each step should advance; allow the single 8-bit wrap.
         if now > prev or (prev > 0xE0 and now < 0x20):
             rises += 1
         prev = now
@@ -106,8 +109,6 @@ async def test_test_bit_holds_pulse_high(dut):
 
     assert await s.read(OSC3) == 0xFF, "TEST must hold the pulse output high"
 
-    # Releasing TEST lets the accumulator run again, so the duty cycle
-    # makes OSC3 leave 0xFF.
     await s.write(CTRL[2], PULSE)
     seen = set()
     for _ in range(32):
@@ -132,7 +133,6 @@ async def test_triangle_is_folded(dut):
 
     assert max(vals) > 0xC0 and min(vals) < 0x40, (
         "triangle should cover most of the range")
-    # A fold means the direction reverses at least once.
     ups = sum(1 for a, b in zip(vals, vals[1:]) if b > a)
     downs = sum(1 for a, b in zip(vals, vals[1:]) if b < a)
     assert ups > 2 and downs > 2, f"triangle should rise and fall ({ups}/{downs})"
@@ -160,7 +160,6 @@ async def test_envelope_attack_decay_release(dut):
     await s.set_adsr(2, a=0, d=0, s=8, r=0)
     await s.write(CTRL[2], SAW | GATE)
 
-    # Attack: fastest rate is 9 phi2 cycles per step, 255 steps.
     peak = 0
     for _ in range(60):
         await s.idle(100)
@@ -169,7 +168,6 @@ async def test_envelope_attack_decay_release(dut):
             break
     assert peak == 0xFF, f"attack should reach full scale, got {peak:#04x}"
 
-    # Decay towards the sustain level of 0x88.
     for _ in range(400):
         await s.idle(100)
         if await s.read(ENV3) <= 0x8A:
@@ -177,12 +175,10 @@ async def test_envelope_attack_decay_release(dut):
     env = await s.read(ENV3)
     assert 0x86 <= env <= 0x8A, f"should settle at sustain 0x88, got {env:#04x}"
 
-    # Sustain holds.
     await s.idle(3000)
     env = await s.read(ENV3)
     assert 0x86 <= env <= 0x8A, f"sustain should hold, got {env:#04x}"
 
-    # Release falls back to zero.
     await s.write(CTRL[2], SAW)
     for _ in range(600):
         await s.idle(100)
@@ -192,24 +188,44 @@ async def test_envelope_attack_decay_release(dut):
 
 
 @cocotb.test()
+async def test_attack_timing_matches_hardware(dut):
+    """The fastest attack takes 255 * 9 phi2 periods, as the hardware does."""
+    s = await start(dut)
+    await s.set_adsr(0, a=0, d=0, s=15, r=0)
+
+    await s.idle(2)
+    await s.write(CTRL[0], SAW | GATE)
+
+    cycles = 0
+    while cycles < 6000:
+        await s.idle(10)
+        cycles += 10
+        if s.dut.user_project.u_core.u_e0.env_o.value.to_unsigned() == 0xFF:
+            break
+
+    # 255 steps at 9+1 phi2 cycles per step is 2550; allow for the write
+    # and the sampling granularity.
+    assert 2300 <= cycles <= 2800, (
+        f"attack took {cycles} phi2 periods, expected about 2550")
+
+
+@cocotb.test()
 async def test_audio_output_and_volume(dut):
     """A gated voice produces a moving output that scales with volume."""
     s = await start(dut)
     await s.write(MODEVOL, 0x0F)
-    await s.set_freq(0, 0x4000)          # wraps every 1024 phi2 periods
+    await s.set_freq(0, 0x4000)
     await s.set_adsr(0, a=0, d=0, s=15, r=0)
     await s.write(CTRL[0], SAW | GATE)
-
-    # Let the envelope reach full scale.
     await s.idle(3000)
 
-    loud = await collect(s, 1500)
+    loud = await s.collect(300)
     span_loud = max(loud) - min(loud)
     assert span_loud > 2000, f"expected a large swing, got {span_loud}"
 
     await s.write(MODEVOL, 0x00)
     await s.idle(100)
-    quiet = await collect(s, 500)
+    quiet = await s.collect(100)
     assert all(v == 0 for v in quiet), "volume 0 must mute the output"
 
 
@@ -226,7 +242,7 @@ async def test_pdm_output_toggles(dut):
     ones = 0
     for _ in range(4000):
         await RisingEdge(dut.clk)
-        ones += dut.uo_out.value.integer & 1
+        ones += dut.uo_out.value.to_unsigned() & 1
 
     assert 200 < ones < 3800, f"PDM duty cycle looks stuck ({ones}/4000)"
 
@@ -236,22 +252,20 @@ async def test_lowpass_attenuates(dut):
     """Routing a voice through a low cutoff low-pass reduces its level."""
     s = await start(dut)
     await s.write(MODEVOL, LP | 0x0F)
-    await s.set_freq(0, 0x2000)          # a few kHz, well above the cutoff
+    await s.set_freq(0, 0x2000)
     await s.set_adsr(0, a=0, d=0, s=15, r=0)
     await s.write(CTRL[0], SAW | GATE)
     await s.idle(3000)
 
-    # Unfiltered reference.
     await s.write(RESFILT, 0x00)
     await s.idle(500)
-    dry = await collect(s, 1200)
+    dry = await s.collect(250)
     span_dry = max(dry) - min(dry)
 
-    # Route voice 1 into the filter with the cutoff at the bottom.
-    await s.write(RESFILT, 0x01)
+    await s.write(RESFILT, FILT1)
     await s.set_cutoff(0)
     await s.idle(4000)
-    wet = await collect(s, 1200)
+    wet = await s.collect(250)
     span_wet = max(wet) - min(wet)
 
     dut._log.info(f"dry span {span_dry}, low-pass span {span_wet}")
@@ -267,13 +281,54 @@ async def test_highpass_passes_high_cutoff(dut):
     await s.set_freq(0, 0x2000)
     await s.set_adsr(0, a=0, d=0, s=15, r=0)
     await s.write(CTRL[0], SAW | GATE)
-    await s.write(RESFILT, 0x01)
+    await s.write(RESFILT, FILT1)
     await s.set_cutoff(0)
     await s.idle(4000)
 
-    wet = await collect(s, 1200)
+    wet = await s.collect(250)
     span = max(wet) - min(wet)
     assert span > 1000, f"high-pass should pass this voice, got {span}"
+
+
+@cocotb.test()
+async def test_filter_is_stable_across_the_range(dut):
+    """No cutoff and resonance combination may let the loop run away.
+
+    A two-integrator loop is only stable while w0 < 2 - 1/Q, and at this
+    filter's phi2/8 sample rate the top of the cutoff range leaves little
+    room.  This sweeps the corners with a voice driving the filter and
+    checks the state variables stay well short of their clamps.
+    """
+    s = await start(dut)
+    await s.write(MODEVOL, LP | BP | HP | 0x0F)
+    await s.set_freq(0, 0x1000)
+    await s.set_adsr(0, a=0, d=0, s=15, r=0)
+    await s.write(CTRL[0], SAW | GATE)
+    await s.write(RESFILT, FILT1)
+    await s.idle(2000)
+
+    flt = s.dut.user_project.u_core.u_audio
+    worst = 0
+    worst_at = None
+
+    for res in (0x0, 0x8, 0xF):
+        for fc in (0, 0x400, 0x7FF):
+            await s.write(RESFILT, (res << 4) | FILT1)
+            await s.set_cutoff(fc)
+            await s.idle(3000)           # let the smoother settle
+            for _ in range(200):
+                await s.idle(FRAME)
+                for name in ("f_low", "f_band", "f_high"):
+                    v = abs(getattr(flt, name).value.to_signed())
+                    if v > worst:
+                        worst, worst_at = v, (res, fc, name)
+
+    dut._log.info(f"worst filter state magnitude {worst} at {worst_at}")
+    # The clamp sits at 131071; anything approaching it means the loop is
+    # diverging rather than tracking the input.
+    assert worst < 60000, (
+        f"filter state reached {worst} at res/fc/{worst_at}, which indicates "
+        "an unstable loop")
 
 
 @cocotb.test()
@@ -281,17 +336,17 @@ async def test_voice3_off(dut):
     """Bit 7 of MODE/VOL silences voice 3 only while it is unfiltered."""
     s = await start(dut)
     await s.write(MODEVOL, 0x0F)
-    await s.set_freq(2, 0x4000)          # wraps every 1024 phi2 periods
+    await s.set_freq(2, 0x4000)
     await s.set_adsr(2, a=0, d=0, s=15, r=0)
     await s.write(CTRL[2], SAW | GATE)
     await s.idle(3000)
 
-    on = await collect(s, 1500)
+    on = await s.collect(300)
     assert max(on) - min(on) > 1000, "voice 3 should be audible"
 
     await s.write(MODEVOL, VOICE3OFF | 0x0F)
     await s.idle(200)
-    off = await collect(s, 1500)
+    off = await s.collect(300)
     assert all(v == 0 for v in off), "3 OFF should silence an unfiltered voice 3"
 
 
@@ -299,9 +354,6 @@ async def test_voice3_off(dut):
 async def test_oscillator_sync(dut):
     """SYNC resets a voice's accumulator from the previous voice's MSB."""
     s = await start(dut)
-    # Voice 3 takes its sync source from voice 2.  The source wraps every
-    # 512 phi2 periods; the slave would need 16384 to complete one ramp of
-    # its own, so being hard-synced pins its output near zero.
     await s.set_freq(1, 0x8000)
     await s.write(CTRL[1], SAW)
     await s.set_freq(2, 0x0400)
@@ -316,8 +368,6 @@ async def test_oscillator_sync(dut):
     assert max(synced) < 0x18, (
         f"a hard-synced ramp should stay near zero, peaked at {max(synced):#04x}")
 
-    # With SYNC cleared the same voice is free to run all the way up.
-    # Its own ramp takes 16384 phi2 periods, so give it time to climb.
     await s.write(CTRL[2], SAW)
     free = []
     for _ in range(40):
@@ -329,6 +379,36 @@ async def test_oscillator_sync(dut):
 
 
 @cocotb.test()
+async def test_ext_in_reaches_the_filter(dut):
+    """EXT IN is summed into the filter when FILT EX is set."""
+    s = await start(dut)
+    await s.write(MODEVOL, LP | 0x0F)
+    await s.set_cutoff(0x7FF)
+    await s.write(RESFILT, FILTEX)       # EXT IN only, no voices
+    await s.idle(2000)
+
+    # Hold EXT IN low, then high; the mixer should follow.
+    s.set_ext_in(0)
+    await s.idle(2000)
+    low = await s.collect(100)
+
+    s.set_ext_in(1)
+    await s.idle(2000)
+    high = await s.collect(100)
+
+    dut._log.info(f"EXT IN low mean {sum(low)//len(low)}, "
+                  f"high mean {sum(high)//len(high)}")
+    assert sum(high) // len(high) > sum(low) // len(low) + 500, (
+        "driving EXT IN high should move the output")
+
+    # With FILT EX cleared it must be ignored.
+    await s.write(RESFILT, 0x00)
+    await s.idle(2000)
+    muted = await s.collect(100)
+    assert max(muted) - min(muted) < 100, "EXT IN should be gated by FILT EX"
+
+
+@cocotb.test()
 async def test_model_select(dut):
     """The 1F extension switches between the 6581 and 8580 cutoff laws."""
     s = await start(dut)
@@ -337,11 +417,11 @@ async def test_model_select(dut):
     await s.set_cutoff(0x400)
     await s.write(CFG, 0x00)             # 6581
     await s.idle(4)
-    w0_6581 = core.u_audio.u_fc.w0.value.integer
+    w0_6581 = core.u_audio.u_fc.w0.value.to_unsigned()
 
     await s.write(CFG, 0x01)             # 8580
     await s.idle(4)
-    w0_8580 = core.u_audio.u_fc.w0.value.integer
+    w0_8580 = core.u_audio.u_fc.w0.value.to_unsigned()
 
     dut._log.info(f"w0 6581={w0_6581} 8580={w0_8580}")
     assert w0_6581 != w0_8580, "the two cutoff laws should differ"
@@ -353,8 +433,7 @@ async def test_i2s_stream(dut):
     """The I2S output carries the mixer sample, MSB first, one bit after WS."""
     s = await start(dut)
 
-    # Hold the output at a constant value: TEST forces the pulse output
-    # high, so with a full envelope the sample does not move.
+    # TEST forces the pulse output high, so the sample does not move.
     await s.write(MODEVOL, 0x0F)
     await s.set_adsr(0, a=0, d=0, s=15, r=0)
     await s.write(CTRL[0], PULSE | TEST | GATE)
@@ -362,35 +441,29 @@ async def test_i2s_stream(dut):
 
     expected = s.audio()
     assert expected != 0, "the test setup should produce a steady non-zero sample"
-    # The DAC sends offset binary, so silence is 0x8000.
     want = (expected + 0x8000) & 0xFFFF
     dut._log.info(f"audio_o={expected}, expecting I2S word {want:#06x}")
 
-    SD, WS, SCK = 2, 3, 4
+    SD, WS = 1, 2
 
-    # Follow SCK rising edges, which is when an I2S receiver samples.
-    prev_sck = 0
     prev_ws = None
     bits = []
     words = []
 
-    for _ in range(40000):
+    # sck is phi2, and an I2S receiver samples on its rising edge.
+    for _ in range(4000):
         await RisingEdge(dut.clk)
-        o = dut.uo_out.value.integer
-        sck = (o >> SCK) & 1
-        if sck and not prev_sck:
-            ws = (o >> WS) & 1
-            if prev_ws is not None and ws != prev_ws:
-                if len(bits) >= 17:
-                    # Drop the one-bit delay, then take the 16 data bits.
-                    w = 0
-                    for b in bits[1:17]:
-                        w = (w << 1) | b
-                    words.append(w)
-                bits = []
-            prev_ws = ws
-            bits.append((o >> SD) & 1)
-        prev_sck = sck
+        o = dut.uo_out.value.to_unsigned()
+        ws = (o >> WS) & 1
+        if prev_ws is not None and ws != prev_ws:
+            if len(bits) >= 17:
+                w = 0
+                for b in bits[1:17]:
+                    w = (w << 1) | b
+                words.append(w)
+            bits = []
+        prev_ws = ws
+        bits.append((o >> SD) & 1)
         if len(words) >= 5:
             break
 

@@ -15,7 +15,6 @@
 module sid_envelope (
     input  wire       clk,
     input  wire       rst_n,
-    input  wire       tick,       // one phi2 period
 
     input  wire       gate,       // control register bit 0
     input  wire [3:0] attack,
@@ -67,12 +66,12 @@ module sid_envelope (
   end
 
   reg [14:0] rate_counter;
-  wire       rate_hit = tick && (rate_counter >= rate_period);
+  wire       rate_hit = (rate_counter >= rate_period);
 
   always @(posedge clk) begin
     if (!rst_n)
       rate_counter <= 15'd0;
-    else if (tick)
+    else
       rate_counter <= rate_hit ? 15'd0 : (rate_counter + 15'd1);
   end
 

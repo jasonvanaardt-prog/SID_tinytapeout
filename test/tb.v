@@ -10,11 +10,12 @@
 
 module tb ();
 
-  // Waveform dumping costs a lot of simulation time, so it is opt-in via
-  // +vcd.  The regression Makefile passes it; the WAV renderer does not.
+  // Dump the signals to an FST file. You can view it with gtkwave or surfer.
+  // Dumping costs a lot of simulation time, so the WAV renderer turns it
+  // off with +nodump.
   initial begin
-    if ($test$plusargs("vcd")) begin
-      $dumpfile("tb.vcd");
+    if (!$test$plusargs("nodump")) begin
+      $dumpfile("tb.fst");
       $dumpvars(0, tb);
     end
     #1;

@@ -6,4 +6,12 @@ on:
 
 jobs:
   docs:
-    uses: TinyTapeout/tt-gds-action/.github/workflows/docs.yaml@ttsky26d
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build docs
+        uses: TinyTapeout/tt-gds-action/docs@ttsky26d

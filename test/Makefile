@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Jason van Aardt
 # SPDX-License-Identifier: CERN-OHL-S-2.0
+# See https://docs.cocotb.org/en/stable/quickstart.html for more info
 
+# defaults
 SIM ?= icarus
+FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
 PROJECT_SOURCES = sid_voice.v sid_envelope.v sid_fc_curve.v sid_q_table.v \
@@ -9,34 +12,42 @@ PROJECT_SOURCES = sid_voice.v sid_envelope.v sid_fc_curve.v sid_q_table.v \
 
 ifneq ($(GATES),yes)
 
-# RTL simulation
-SIM_BUILD        = sim_build/rtl
+# RTL simulation:
+SIM_BUILD				= sim_build/rtl
 VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
 
 else
 
-# Gate-level simulation of the hardened netlist
-SIM_BUILD         = sim_build/gl
-COMPILE_ARGS     += -DGL_TEST
-COMPILE_ARGS     += -DFUNCTIONAL
-COMPILE_ARGS     += -DUSE_POWER_PINS
-COMPILE_ARGS     += -DSIM
-COMPILE_ARGS     += -DUNIT_DELAY=\#1
-VERILOG_SOURCES  += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/primitives.v
-VERILOG_SOURCES  += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd.v
-VERILOG_SOURCES  += $(PWD)/gate_level_netlist.v
+# Gate level simulation:
+SIM_BUILD				= sim_build/gl
+COMPILE_ARGS    += -DGL_TEST
+COMPILE_ARGS    += -DFUNCTIONAL
+COMPILE_ARGS    += -DUSE_POWER_PINS
+COMPILE_ARGS    += -DSIM
+COMPILE_ARGS    += -DUNIT_DELAY=\#1
+VERILOG_SOURCES += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/primitives.v
+VERILOG_SOURCES += $(PDK_ROOT)/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd.v
+
+# this gets copied in by the GDS action workflow
+VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
 
 endif
 
+# Allow sharing configuration between design and testbench via `include`:
+COMPILE_ARGS 		+= -I$(SRC_DIR)
+
+# Include the testbench sources:
 VERILOG_SOURCES += $(PWD)/tb.v
 TOPLEVEL = tb
-MODULE   = test
-PLUSARGS ?= +vcd
 
+# List test modules to run, separated by commas and without the .py suffix:
+COCOTB_TEST_MODULES = test
+
+# include cocotb's make rules to take care of the simulator setup
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
 # Render a short demo to sid_demo.wav.  Much slower than the regression,
-# so it runs without waveform dumping and at the minimum clk/phi2 ratio.
+# so it runs with waveform dumping disabled.
 .PHONY: record
 record:
-	$(MAKE) MODULE=record PLUSARGS= SIM_BUILD=sim_build/record
+	$(MAKE) COCOTB_TEST_MODULES=record PLUSARGS=+nodump SIM_BUILD=sim_build/record

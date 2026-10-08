@@ -1,11 +1,14 @@
 """
 Renders a short demo from the tile and writes it to sid_demo.wav.
 
-Run with:  make record        (optionally DURATION_MS=500)
+Run with:  make record        (optionally DURATION_MS=2000)
 
 This drives the tile exactly as a C64 would -- every note is a sequence of
-register writes over the phi2 bus -- and captures the sample stream from
-the mixer output.
+register writes over the phi2 bus, with phi2 at the PAL rate -- and
+captures the sample stream from the mixer output.  Because the design is
+clocked at 985 kHz rather than from a fast system clock, the simulation
+runs roughly twenty times faster than real-time audio length would
+suggest, so a couple of seconds is cheap to render.
 
 SPDX-FileCopyrightText: 2026 Jason van Aardt
 SPDX-License-Identifier: CERN-OHL-S-2.0
@@ -19,20 +22,20 @@ from cocotb.clock import Clock
 
 import sid
 from sid import (CTRL, MODEVOL, RESFILT, FCLO, FCHI,
-                 SAW, PULSE, NOISE, TRI, GATE, LP, BP)
+                 SAW, PULSE, NOISE, GATE, LP, FILT1, FILT2, FRAME,
+                 PHI2_PAL)
 
-CLK_NS = 20
-CLK_PER_PHI2 = 16          # the minimum the audio pipeline allows
-PHI2_HZ = 1_000_000
-DECIMATE = 20              # 1 MHz / 20 = 50 kHz output rate
-SAMPLE_RATE = PHI2_HZ // DECIMATE
+PERIOD_PS = 2 * round(1e12 / PHI2_PAL / 2)
 
-DURATION_MS = int(os.environ.get("DURATION_MS", "300"))
+# One audio sample per filter frame: phi2/8 = 123.156 kHz.
+SAMPLE_RATE = PHI2_PAL // FRAME
+
+DURATION_MS = int(os.environ.get("DURATION_MS", "1500"))
 
 
 def note(freq_hz):
-    """SID frequency register value for a pitch, at a 1 MHz phi2."""
-    return min(0xFFFF, round(freq_hz * (1 << 24) / PHI2_HZ))
+    """SID frequency register value for a pitch, at the PAL phi2 rate."""
+    return min(0xFFFF, round(freq_hz * (1 << 24) / PHI2_PAL))
 
 
 # A short descending figure, with a fifth above on voice 2.
@@ -46,16 +49,16 @@ TUNE = [
 
 @cocotb.test()
 async def render_wav(dut):
-    cocotb.start_soon(Clock(dut.clk, CLK_NS, units="ns").start())
-    s = sid.Sid(dut, CLK_PER_PHI2)
+    cocotb.start_soon(Clock(dut.clk, PERIOD_PS, unit="ps").start())
+    s = sid.Sid(dut)
     await s.reset()
 
-    total_periods = DURATION_MS * PHI2_HZ // 1000
-    step = total_periods // len(TUNE)
+    total_frames = DURATION_MS * SAMPLE_RATE // 1000
+    step = total_frames // len(TUNE)
 
     # Master volume up, low-pass selected, voices 1 and 2 through the filter.
     await s.write(MODEVOL, LP | 0x0F)
-    await s.write(RESFILT, 0x08 | 0x03)      # RES=0, filter voices 1 and 2
+    await s.write(RESFILT, (4 << 4) | FILT1 | FILT2)
     await s.set_adsr(0, a=2, d=9, s=10, r=9)
     await s.set_adsr(1, a=3, d=10, s=8, r=10)
     await s.set_adsr(2, a=0, d=6, s=0, r=6)
@@ -63,16 +66,16 @@ async def render_wav(dut):
 
     samples = []
     dut._log.info(f"rendering {DURATION_MS} ms at {SAMPLE_RATE} Hz "
-                  f"({total_periods} phi2 periods)")
+                  f"({total_frames} frames)")
 
     for idx, (f1, f2) in enumerate(TUNE):
         await s.set_freq(0, note(f1))
         await s.set_freq(1, note(f2))
+        await s.set_freq(2, 0xC000)
         await s.write(CTRL[0], PULSE | GATE)
         await s.write(CTRL[1], SAW | GATE)
         # Voice 3 is a short noise hit on the first beat of each pair.
         await s.write(CTRL[2], (NOISE | GATE) if idx % 2 == 0 else 0)
-        await s.set_freq(2, 0xC000)
 
         for n in range(step):
             # Sweep the cutoff down across each note.
@@ -81,10 +84,8 @@ async def render_wav(dut):
                 await s.write(FCLO, fc & 0x07)
                 await s.write(FCHI, (fc >> 3) & 0xFF)
             else:
-                await s.idle(1)
-
-            if n % DECIMATE == 0:
-                samples.append(s.audio())
+                await s.idle(FRAME)
+            samples.append(s.audio())
 
         # Release the notes for the last part of each step.
         await s.write(CTRL[0], PULSE)
