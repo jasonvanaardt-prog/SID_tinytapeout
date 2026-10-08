@@ -79,9 +79,18 @@ module tt_um_sid6581 (
   assign uio_oe  = {8{data_oe}};
 
   // ----------------------------------------------------------------- audio
+  // I2S bit clock source: phi2 directly by default, or a registered
+  // divide-by-two if built with -DSID_I2S_SCK_DIV2.  See sid_dac.v for the
+  // trade-off (bandwidth against having no clock-as-data path).
+`ifdef SID_I2S_SCK_DIV2
+  localparam I2S_SCK_DIV2 = 1;
+`else
+  localparam I2S_SCK_DIV2 = 0;
+`endif
+
   wire pdm, i2s_sck, i2s_ws, i2s_sd;
 
-  sid_dac u_dac (
+  sid_dac #(.SCK_DIV2(I2S_SCK_DIV2)) u_dac (
       .clk       (clk),
       .rst_n     (rst_n),
       .sample    (audio),

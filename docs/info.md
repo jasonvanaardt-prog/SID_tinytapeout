@@ -202,6 +202,18 @@ and shifted down by two, which both decimates 4:1 and puts a null right at
 the frame rate; without that, content between 15 kHz and the 123 kHz
 filter rate would alias into the I2S band.
 
+Taking `sck` straight from phi2 routes the clock net to an output pin.
+The Tiny Tapeout flow expects that -- its config sets
+`DESIGN_REPAIR_BUFFER_OUTPUT_PORTS` to 0 precisely so output ports do not
+collect clock buffers, and any skew it does pick up is irrelevant against
+a 1015 ns period. If you would rather not have a clock-as-data path at
+all, build with `-DSID_I2S_SCK_DIV2` (add it to `VERILOG_DEFINES` in
+`src/config.json`): `sck` then comes from a registered divide-by-two, so
+only flop outputs leave the module. The frame takes 64 phi2 periods
+instead of 32, which halves the I2S rate to 15.4 kHz and the bandwidth to
+7.7 kHz, and the decimation changes to 8:1 to match. The sigma-delta
+output is identical either way.
+
 ### What can and cannot be reproduced on a digital tile
 
 - **EXT IN (pin 26) is available, but not as an analog input.** With phi2

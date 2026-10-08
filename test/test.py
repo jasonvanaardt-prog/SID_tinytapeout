@@ -12,7 +12,7 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge
+from cocotb.triggers import First, FallingEdge, RisingEdge, Timer
 
 import sid
 from sid import (CTRL, MODEVOL, RESFILT, OSC3, ENV3, POTX, POTY,
@@ -459,28 +459,35 @@ async def test_i2s_stream(dut):
     # must be identical -- and it must not be the silence code.
     dut._log.info("decoding the I2S stream from uo_out")
 
-    SD, WS = 1, 2
+    SD, WS, SCK = 1, 2, 3
 
     prev_ws = None
+    prev_sck = 0
     bits = []
     words = []
 
-    # sck is phi2, and an I2S receiver samples on its rising edge.
-    for _ in range(4000):
-        await RisingEdge(dut.clk)
+    # Track sck transitions rather than assuming sck is clk, so this works
+    # whether the bit clock is phi2 directly or the divided variant.  An
+    # I2S receiver samples on the rising edge of sck.
+    for _ in range(8000):
+        await First(RisingEdge(dut.clk), FallingEdge(dut.clk))
+        await Timer(1, unit="ps")
         o = dut.uo_out.value.to_unsigned()
-        ws = (o >> WS) & 1
-        if prev_ws is not None and ws != prev_ws:
-            if len(bits) >= 17:
-                w = 0
-                for b in bits[1:17]:
-                    w = (w << 1) | b
-                words.append(w)
-            bits = []
-        prev_ws = ws
-        bits.append((o >> SD) & 1)
-        if len(words) >= 5:
-            break
+        sck = (o >> SCK) & 1
+        if sck and not prev_sck:
+            ws = (o >> WS) & 1
+            if prev_ws is not None and ws != prev_ws:
+                if len(bits) >= 17:
+                    w = 0
+                    for b in bits[1:17]:
+                        w = (w << 1) | b
+                    words.append(w)
+                bits = []
+            prev_ws = ws
+            bits.append((o >> SD) & 1)
+            if len(words) >= 5:
+                break
+        prev_sck = sck
 
     # The first word is discarded: the decoder starts part-way through a
     # frame, so it has no complete slot to work with.

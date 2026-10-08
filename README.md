@@ -74,8 +74,19 @@ uo[0] ──[ 1k ]──┬──[ 1k ]──┬──[ 10uF ]──> line out
 
 At the phi2 clock rate that output is good for about 59 dB in the audio
 band, which is in the same territory as a real 6581 in a C64. For better
-than that, feed `uo[1..3]` into an I2S DAC. `docs/info.md` has the full
-discussion, including why there is no PWM output.
+than that, feed `uo[1..3]` into an I2S DAC at phi2/32 (30.8 kHz).
+`docs/info.md` has the full discussion, including why there is no PWM
+output.
+
+### Build options
+
+| Define | Effect |
+|---|---|
+| *(none)* | I2S `sck` is phi2 directly: 30.8 kHz frames, 15.4 kHz bandwidth |
+| `SID_I2S_SCK_DIV2` | `sck` is a registered divide-by-two, so no clock reaches an output pin; 15.4 kHz frames, 7.7 kHz bandwidth |
+
+Add it to `VERILOG_DEFINES` in `src/config.json` to change the hardened
+build. The sigma-delta output on `uo[0]` is unaffected either way.
 
 ## Implementation notes
 
@@ -86,8 +97,9 @@ averaged for cheap anti-aliasing) and one doing the filter and master
 volume. Oscillators and envelopes update every phi2 period; the filter and
 mixer produce a sample every eighth, at 123.156 kHz on PAL.
 
-Synthesised against `sky130_fd_sc_hd` the design is 66566 um2 -- 43% of a
-4x2 tile. With a 1015 ns clock period there is no timing pressure.
+With a 1015 ns clock period there is no timing pressure anywhere in the
+design. `scripts/harden_local.sh` reproduces the CI hardening flow
+locally; see the area and timing figures it reports.
 
 ## Running the tests
 
