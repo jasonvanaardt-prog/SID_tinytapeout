@@ -4,3 +4,4 @@ test/*.vcd
 test/*.log
 test/__pycache__/
 runs/
+test/sid_demo.wav

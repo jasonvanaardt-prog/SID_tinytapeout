@@ -80,14 +80,22 @@ module sid_audio (
   // Two cascaded one-pole smoothers on w0.  Without these, a program
   // stepping the cutoff register produces an audible click on every
   // write; the real filter's control voltage is smoothed the same way.
-  reg [12:0] w0_lag0, w0_lag1;
+  //
+  // These are exponential moving averages with a gain of 64, held in
+  // Q13.6 so they settle on the target exactly rather than parking an
+  // LSB short of it.  The time constant is 64 phi2 periods, a corner
+  // near 2.5 kHz per pole: slow enough to take the edge off a register
+  // step, still some two orders of magnitude faster than a filter sweep.
+  reg [19:0] w0_lag0, w0_lag1;
+  wire [12:0] w0_smooth = w0_lag1[19:6];
+
   always @(posedge clk) begin
     if (!rst_n) begin
-      w0_lag0 <= 13'd0;
-      w0_lag1 <= 13'd0;
+      w0_lag0 <= 20'd0;
+      w0_lag1 <= 20'd0;
     end else if (tick) begin
-      w0_lag0 <= (w0_lag0 + w0) >> 1;
-      w0_lag1 <= (w0_lag1 + w0_lag0) >> 1;
+      w0_lag0 <= w0_lag0 - (w0_lag0 >> 6) + {7'd0, w0};
+      w0_lag1 <= w0_lag1 - (w0_lag1 >> 6) + {7'd0, w0_lag0[19:6]};
     end
   end
 
@@ -190,7 +198,7 @@ module sid_audio (
           r_unfilt <= sum_unfilt;
           r_filt   <= sum_filt;
           mul_a    <= f_band;
-          mul_b    <= w0_lag1;
+          mul_b    <= w0_smooth;
           st       <= 4'd5;
         end
 
@@ -212,7 +220,7 @@ module sid_audio (
 
         4'd8: begin                        // w0 * high
           mul_a <= f_high;
-          mul_b <= w0_lag1;
+          mul_b <= w0_smooth;
           st    <= 4'd9;
         end
 

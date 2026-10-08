@@ -77,10 +77,20 @@ See `docs/info.md` for the full discussion.
 cd test && make
 ```
 
-Needs `iverilog` and `cocotb`. The suite drives the phi2 bus the way a
-6502 would and checks the bus protocol, the oscillators and their sync and
+Needs `iverilog` and `cocotb`. The 16 cases drive the phi2 bus the way a
+6502 would and check the bus protocol, the oscillators and their sync and
 ring-modulation chain, the ADSR envelope through all its phases, the
-filter responses, voice routing and master volume.
+filter responses, voice routing, master volume and the I2S stream.
+
+To hear it, render a short demo to a WAV file:
+
+```bash
+cd test && make record          # or DURATION_MS=500 make record
+```
+
+That plays a four-note figure with a filter sweep by writing registers
+over the phi2 bus, then captures the mixer output to `test/sid_demo.wav`.
+It takes a few minutes -- the simulation runs the full 1 MHz phi2 clock.
 
 ## Licence
 

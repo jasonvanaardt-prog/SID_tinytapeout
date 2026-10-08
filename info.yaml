@@ -6,7 +6,7 @@ project:
   description:  "Digital replica of the MOS 6581/8580 SID: three voices, ADSR envelopes and the two-integrator filter, on the original chip's phi2 bus pinout."
   language:     "Verilog"
   clock_hz:     50000000
-  # ~7.2k generic cells / 818 flip-flops after synthesis.  6x2 leaves
+  # ~7.4k generic cells / 834 flip-flops after synthesis.  6x2 leaves
   # comfortable routing headroom; check the utilisation the gds workflow
   # reports and drop to 4x2 if it fits.
   tiles:        "6x2"
