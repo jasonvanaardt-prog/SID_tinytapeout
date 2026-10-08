@@ -143,7 +143,14 @@ From the schematic, the SGTL5000 (U6) sits in the middle of both analog paths:
   codec is also the ADC for the SID's analog external input. It reaches the
   FPGA only as I2S: `sid_api.sv` takes `ext_in` from `audio_i`, which comes
   from `i2s_dsp_mode`.
-- `LINEOUT_L/R` go to `AOUT_L`/`AOUT_R` on J2 through 10 µF caps.
+- `HP_L`/`HP_R` go to `AOUT_L`/`AOUT_R` on J2 through 10 µF caps (the stereo
+  line-out header). `LINEOUT_L`/`LINEOUT_R` are what feed the opamp.
+- The codec is also doing work that is easy to overlook: it is the I2S clock
+  master, the EXT IN ADC, the DAC, the headphone driver for J2, and it even
+  senses the C64 model via a 1/6 divider from the 12 V / 9 V rail into its MIC
+  input. `sgtl5000_init.v` plays 21 register writes from
+  `sgtl5000_init_data.hex` to set all of that up, never reading back and never
+  checking ACK.
 
 The FPGA talks to it over I2S (pins 10–13) and configures it over I2C (pins 6, 9).
 `AUDIO_OUT`, `EXT_IN`, `EXT_IN_R`, `AOUT_L` and `AOUT_R` exist in the schematic
@@ -163,27 +170,68 @@ modification.** There is no trace from any FPGA pin to AUDIO OUT.
 sigma-delta output designed for precisely this, and `docs/info.md` already
 specifies the RC network. This is purely a routing question.
 
-### Minimum modification
+### Choosing the pin — mind the open-drain trap
 
-1. Pick a spare level-shifted pin on J2: `cs_io1_n` (41), `a5` (42) or `a8` (38).
-   These are only used when the gateware is built for a second SID at D420 /
-   D500 / DE00; in the default `SID2=0` build they are ignored entirely, so
-   they are genuinely free. (The `spi_*` pins are also declared but never
-   connected to anything inside `redip_sid.sv` — however they are wired to the
-   flash and PSRAM chips, so they are a worse choice than the J2 pins.)
-2. Assign the PDM output to it in the PCF.
-3. From that J2 pin, an RC to the AUDIO OUT net:
+There are **no unassigned pins**: `redip_sid.pcf` uses all 39 user I/O of the
+SG48 package. What exists is *reclaimable* pins — assigned but functionally
+unused in a minimal build.
+
+| Candidate | Pin | Verdict |
+|---|---|---|
+| `a5` | 42 | **Good.** Normal push-pull I/O, on J2, ignored when `SID2=0`. |
+| `a8` | 38 | **Good.** Same. |
+| `cs_io1_n` | 41 | **Avoid** — this is **RGB2**, open-drain only. |
+| `pot_x` / `pot_y` | 39 / 40 | **Avoid** — RGB0/RGB1, open-drain only. |
+| `usb_d_p` / `usb_d_n` / `usb_conn` | 25 / 23 / 35 | Electrically fine, but you lose USB (and DFU programming). |
+| `spi_sio2` / `spi_sio3` | 18 / 19 | Fine after configuration, but shared with flash and PSRAM. |
+
+The iCE40UP5K's RGB driver pins are **open-drain current sinks, not push-pull
+outputs** — they cannot source current, so they make a poor PDM pin. On this
+board they also sit behind the `SN74CBT16211` bus switch. Use `a5` (42) or
+`a8` (38).
+
+### Where to inject — the opamp summing node, not the output
+
+AUDIO OUT is produced by U8 (MCP6H01), an **inverting summing amplifier**:
+LINEOUT_L and LINEOUT_R each through 20 kΩ (R8, R9) into the inverting input,
+10 kΩ feedback (R11), non-inverting input tied to +3V3, and powered from the
+C64's 12 V / 9 V rail on SID pin 28. Each channel therefore contributes a gain
+of −0.5, summing stereo to mono.
+
+That summing node is a far better injection point than the opamp output:
+
+1. Assign the sigma-delta output to `a5` (42) or `a8` (38) in the PCF.
+2. RC filter it, then inject into U8's inverting input through a resistor, the
+   same way R8/R9 do. A 20 kΩ injection resistor gives the same −0.5 gain.
+3. Remove R8 and R9 so the (now unused) codec outputs do not also sum in.
 
 ```
-J2 pin ──[ 1k ]──┬──[ 1k ]──┬──[ 10uF ]──> AUDIO OUT (socket pin 27)
-                 │          │
-              [10nF]     [10nF]
-                 │          │
-                GND        GND
+a5/a8 ──[ 1k ]──┬──[ 1k ]──┬──[ 10uF ]──[ 20k ]──> U8 inverting input (R8/R9 pad)
+                │          │
+             [10nF]     [10nF]
+                │          │
+               GND        GND
 ```
 
-4. **Stop U8 driving the same net** — lift its output pin or leave it
-   unpopulated — or the opamp and the RC will fight.
+This keeps U8 doing the level shifting and driving, which matters: the opamp
+runs from the 12 V / 9 V rail and is what gives AUDIO OUT the swing and drive a
+C64 expects. Injecting at the output instead would mean fighting the opamp and
+then driving the C64's load from a ~2 kΩ RC, which is the weak point discussed
+below.
+
+If you would rather bypass U8 entirely, lift its output and feed `J3.2` (socket
+pin 27) from the RC directly — but then the drive-impedance caveat applies in
+full.
+
+**Useful header map for any such mod** (from the schematic):
+
+```
+J3 (1x14) = SID pins 28..15:  1=VDD(12/9V) 2=AUDIO_OUT 3=EXT_IN 4=VCC(5V)
+                              5=POT_X 6=POT_Y 7..14=D7..D0
+J4 (1x10) = SID pins 5..14:   1=/RES 2=Ø2 3=R/W 4=/CS 5..9=A0..A4 10=GND
+J2 (1x05):                    1=AOUT_L 2=AOUT_R 3=/IO1 4=A5 5=A8
+J1 (1x01):                    1=EXT_IN_R
+```
 
 ### Two caveats worth stating plainly
 
@@ -207,10 +255,18 @@ J2 pin ──[ 1k ]──┬──[ 1k ]──┬──[ 10uF ]──> AUDIO OUT
   at all.** On reDIP-SID the SGTL5000 is the I2S *master*: in
   `i2s_dsp_mode.sv`, `pad_lrclk` and `pad_sclk` are configured as registered
   *inputs* (`PIN_TYPE 6'b0000_00`) and only `i2s_din` is an output
-  (`6'b0110_00`). Our `sid_dac` generates `sck` and `ws` as a master at
-  φ2/32 ≈ 30.8 kHz, whereas the codec supplies them at 6.144 MHz for 96 kHz
-  DSP mode. Two masters on one clock line is a direct conflict. Feeding
-  `audio_o` into their I2S slave block side-steps this entirely.
+  (`6'b0110_00`). The codec is explicitly programmed as master —
+  `CHIP_I2S_CTRL = 0x00D8` sets `MS=1`, 24-bit, PCM Format A, 64 SCLK per
+  frame, and `CHIP_CLK_CTRL = 0x000F` selects 96 kHz off the codec's own PLL,
+  giving `i2s_sclk` = 6.144 MHz. Our `sid_dac` generates `sck` and `ws` as a
+  master at φ2/32 ≈ 30.8 kHz. Two masters on one clock line is a direct
+  conflict. Feeding `audio_o` into their I2S slave block side-steps it.
+
+  Their frame is `audio_t` = 2 × 24-bit signed (left = SID 1, right = SID 2),
+  with `BITS=48` shifted out of a 64-bit frame. Internally their audio is
+  20-bit (`sid::s20_t filter_o`), promoted by `<< 4`. Our `audio_o` is signed
+  16-bit, so it needs `<< 8` into the left slot, with the right slot zeroed or
+  mirrored.
 - **Codec-free PDM + RC is the right answer for the ASIC and for any new
   minimal board** — which is exactly what the ASIC already does.
 
