@@ -14,3 +14,7 @@ test/gate_level_netlist.v
 test/sid_demo.wav
 asic/
 .venv/
+tools/obj_dir/
+*.wav
+trace*.txt
+submodules/

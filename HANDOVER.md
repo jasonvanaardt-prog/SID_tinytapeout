@@ -147,6 +147,35 @@ A useful starting view: `clk`, `st`, `u_v0.wave_o` (analog), `u_e0.env_o`,
 `audio_o` (analog signed), `uo_out[0]`. Save it with **File → Write Save
 File** so it reloads next time.
 
+### Playing a real .sid tune
+
+`tools/` has a player that runs an actual `.sid` file through the RTL:
+
+```bash
+# 1. Run the tune's own 6502 player code and dump its register writes
+python3 tools/sid2regs.py Antics_Chip_War.sid --seconds 32 -o tune.txt
+
+# 2. Replay those writes into the design and record the audio
+VERILATOR=<path to verilator> ./tools/build_sidplay.sh     # once
+./tools/obj_dir/sidplay tune.txt --seconds 32 --normalize -o tune.wav
+```
+
+`sid2regs.py` is a 6502 emulator (`tools/cpu6502.py`, 236 opcodes including
+the undocumented ones period players use) plus just enough C64 to run a
+player: VIC raster interrupts and the two CIA timers. It parses the
+PSID/RSID header, calls the tune's init routine, finds the player through
+the IRQ or NMI vector when the header declares none, and then runs the
+machine continuously with interrupts firing exactly as they would on
+hardware. Register writes are timestamped in phi2 cycles.
+
+`sidplay_tb.cpp` is a Verilator harness that drives those writes over the
+phi2 bus and records `audio_o`. It runs **faster than real time** — about
+2.5x — so a 32-second render takes around 13 seconds, against roughly 25
+minutes through Icarus.
+
+Add `--no-digi` to `sid2regs.py` for tunes that play 4-bit samples through
+the volume register; see the note below on why that matters.
+
 ### Listening to it
 
 ```bash
