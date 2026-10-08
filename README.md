@@ -103,6 +103,12 @@ hardware's attack timing, filter responses, filter stability across the
 cutoff and resonance ranges, EXT IN routing, voice routing, master volume
 and the decoded I2S stream.
 
+`GATES=yes make` runs the same suite against the hardened netlist, which
+is what the shuttle's `gl_test` job does. Thirteen of the cases work
+purely through the pins and run there unchanged; the seven that reach into
+the mixer and filter state are skipped, because a flat netlist has no such
+hierarchy.
+
 To hear it, render a demo to a WAV file:
 
 ```bash

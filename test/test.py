@@ -8,6 +8,8 @@ SPDX-FileCopyrightText: 2026 Jason van Aardt
 SPDX-License-Identifier: CERN-OHL-S-2.0
 """
 
+import os
+
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
@@ -23,6 +25,14 @@ from sid import (CTRL, MODEVOL, RESFILT, OSC3, ENV3, POTX, POTY,
 # number of simulator steps, which is what cocotb's Clock requires when
 # no explicit high time is given; the 0.9 ppm error is irrelevant.
 PERIOD_PS = 2 * round(1e12 / PHI2_PAL / 2)
+
+# The gate-level netlist is flattened, so the hierarchical paths the mixer
+# and filter tests reach into do not exist there.  Those tests are skipped
+# for GATES=yes; everything that works through the pins still runs, which
+# is the part worth checking against a netlist anyway.
+# Tests marked @cocotb.test(skip=GL) reach into hierarchical signals that a
+# flat netlist does not have.
+GL = os.environ.get("GATES") == "yes"
 
 
 async def start(dut):
@@ -41,7 +51,8 @@ async def test_reset_state(dut):
     assert await s.read(ENV3) == 0x00, "ENV3 should be 0 after reset"
 
     await s.idle(200)
-    assert s.audio() == 0, "no voice is gated, so the output must be silent"
+    if not GL:
+        assert s.audio() == 0, "no voice is gated, so the output must be silent"
 
 
 @cocotb.test()
@@ -189,27 +200,31 @@ async def test_envelope_attack_decay_release(dut):
 
 @cocotb.test()
 async def test_attack_timing_matches_hardware(dut):
-    """The fastest attack takes 255 * 9 phi2 periods, as the hardware does."""
+    """The fastest attack takes 255 * 10 phi2 periods, as the hardware does.
+
+    Measured on voice 3 through the ENV3 register, so this works on the
+    gate-level netlist too.
+    """
     s = await start(dut)
-    await s.set_adsr(0, a=0, d=0, s=15, r=0)
+    await s.set_adsr(2, a=0, d=0, s=15, r=0)
+    await s.write(CTRL[2], SAW | GATE)
 
-    await s.idle(2)
-    await s.write(CTRL[0], SAW | GATE)
-
+    # Each read costs phi2 periods of its own, so count them as well.
+    PER_READ = 2
     cycles = 0
     while cycles < 6000:
         await s.idle(10)
-        cycles += 10
-        if s.dut.user_project.u_core.u_e0.env_o.value.to_unsigned() == 0xFF:
+        cycles += 10 + PER_READ
+        if await s.read(ENV3) == 0xFF:
             break
 
-    # 255 steps at 9+1 phi2 cycles per step is 2550; allow for the write
-    # and the sampling granularity.
-    assert 2300 <= cycles <= 2800, (
+    # 255 steps at a 9-cycle rate period (so 10 phi2 per step) is 2550;
+    # allow for the gate write and the sampling granularity.
+    assert 2300 <= cycles <= 2900, (
         f"attack took {cycles} phi2 periods, expected about 2550")
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_audio_output_and_volume(dut):
     """A gated voice produces a moving output that scales with volume."""
     s = await start(dut)
@@ -247,7 +262,7 @@ async def test_pdm_output_toggles(dut):
     assert 200 < ones < 3800, f"PDM duty cycle looks stuck ({ones}/4000)"
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_lowpass_attenuates(dut):
     """Routing a voice through a low cutoff low-pass reduces its level."""
     s = await start(dut)
@@ -273,7 +288,7 @@ async def test_lowpass_attenuates(dut):
         f"a low cutoff should attenuate strongly ({span_wet} vs {span_dry})")
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_highpass_passes_high_cutoff(dut):
     """High-pass with the cutoff at the bottom passes the signal through."""
     s = await start(dut)
@@ -290,7 +305,7 @@ async def test_highpass_passes_high_cutoff(dut):
     assert span > 1000, f"high-pass should pass this voice, got {span}"
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_filter_is_stable_across_the_range(dut):
     """No cutoff and resonance combination may let the loop run away.
 
@@ -331,7 +346,7 @@ async def test_filter_is_stable_across_the_range(dut):
         "an unstable loop")
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_voice3_off(dut):
     """Bit 7 of MODE/VOL silences voice 3 only while it is unfiltered."""
     s = await start(dut)
@@ -378,7 +393,7 @@ async def test_oscillator_sync(dut):
         f"without sync the ramp should climb, peaked at {max(free):#04x}")
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_ext_in_reaches_the_filter(dut):
     """EXT IN is summed into the filter when FILT EX is set."""
     s = await start(dut)
@@ -408,7 +423,7 @@ async def test_ext_in_reaches_the_filter(dut):
     assert max(muted) - min(muted) < 100, "EXT IN should be gated by FILT EX"
 
 
-@cocotb.test()
+@cocotb.test(skip=GL)
 async def test_model_select(dut):
     """The 1F extension switches between the 6581 and 8580 cutoff laws."""
     s = await start(dut)
@@ -439,10 +454,10 @@ async def test_i2s_stream(dut):
     await s.write(CTRL[0], PULSE | TEST | GATE)
     await s.idle(3000)
 
-    expected = s.audio()
-    assert expected != 0, "the test setup should produce a steady non-zero sample"
-    want = (expected + 0x8000) & 0xFFFF
-    dut._log.info(f"audio_o={expected}, expecting I2S word {want:#06x}")
+    # Taken from the pins only, so this also runs on the gate-level netlist.
+    # With TEST held the mixer output is constant, so every decoded word
+    # must be identical -- and it must not be the silence code.
+    dut._log.info("decoding the I2S stream from uo_out")
 
     SD, WS = 1, 2
 
@@ -472,5 +487,12 @@ async def test_i2s_stream(dut):
     words = words[1:]
 
     assert len(words) >= 3, f"expected several I2S words, decoded {len(words)}"
-    assert all(w == want for w in words), (
-        f"I2S words {[hex(w) for w in words]} should all be {want:#06x}")
+    assert len(set(words)) == 1, (
+        f"a steady mixer output should give identical I2S words, got "
+        f"{[hex(w) for w in words]}")
+    word = words[0]
+    assert word not in (0x8000, 0x0000, 0xFFFF), (
+        f"I2S word {word:#06x} looks like silence or a stuck bus")
+    if not GL:
+        want = (s.audio() + 0x8000) & 0xFFFF
+        assert word == want, f"I2S word {word:#06x} should be {want:#06x}"
