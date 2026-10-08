@@ -1,0 +1,18 @@
+name: gds
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  gds:
+    uses: TinyTapeout/tt-gds-action/.github/workflows/gds.yaml@ttsky26d
+  precheck:
+    needs: gds
+    uses: TinyTapeout/tt-gds-action/.github/workflows/precheck.yaml@ttsky26d
+  gl_test:
+    needs: gds
+    uses: TinyTapeout/tt-gds-action/.github/workflows/gl_test.yaml@ttsky26d
+  viewer:
+    needs: gds
+    uses: TinyTapeout/tt-gds-action/.github/workflows/viewer.yaml@ttsky26d

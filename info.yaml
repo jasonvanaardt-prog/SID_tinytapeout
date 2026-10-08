@@ -1,0 +1,55 @@
+# Tiny Tapeout project information
+project:
+  title:        "SID 6581 / 8580 Replica"
+  author:       "Jason van Aardt"
+  discord:      ""
+  description:  "Digital replica of the MOS 6581/8580 SID: three voices, ADSR envelopes and the two-integrator filter, on the original chip's phi2 bus pinout."
+  language:     "Verilog"
+  clock_hz:     50000000
+  # ~7.2k generic cells / 818 flip-flops after synthesis.  6x2 leaves
+  # comfortable routing headroom; check the utilisation the gds workflow
+  # reports and drop to 4x2 if it fits.
+  tiles:        "6x2"
+  top_module:   "tt_um_sid6581"
+
+  source_files:
+    - "sid_voice.v"
+    - "sid_envelope.v"
+    - "sid_fc_curve.v"
+    - "sid_q_table.v"
+    - "sid_audio.v"
+    - "sid_dac.v"
+    - "sid_core.v"
+    - "project.v"
+
+# The dedicated inputs carry the whole 6581 host interface except the
+# data bus, which needs the bidirectional pins.
+pinout:
+  ui[0]: "A0 - address bit 0 (6581 pin 9)"
+  ui[1]: "A1 - address bit 1 (6581 pin 10)"
+  ui[2]: "A2 - address bit 2 (6581 pin 11)"
+  ui[3]: "A3 - address bit 3 (6581 pin 12)"
+  ui[4]: "A4 - address bit 4 (6581 pin 13)"
+  ui[5]: "/CS - chip select, active low (6581 pin 8)"
+  ui[6]: "R//W - high to read, low to write (6581 pin 7)"
+  ui[7]: "phi2 - bus and oscillator clock, nominally 1 MHz (6581 pin 6)"
+
+  uo[0]: "AUDIO OUT - 1-bit sigma-delta, needs an RC reconstruction filter (6581 pin 27)"
+  uo[1]: "AUDIO PWM - 8-bit PWM alternative to uo[0]"
+  uo[2]: "I2S SD - serial audio data"
+  uo[3]: "I2S WS - word select"
+  uo[4]: "I2S SCK - bit clock"
+  uo[5]: "OSC3 MSB - voice 3 oscillator MSB"
+  uo[6]: "ENV3 active - voice 3 envelope is non-zero"
+  uo[7]: "phi2 sample strobe"
+
+  uio[0]: "D0 - data bus bit 0 (6581 pin 15)"
+  uio[1]: "D1 - data bus bit 1 (6581 pin 16)"
+  uio[2]: "D2 - data bus bit 2 (6581 pin 17)"
+  uio[3]: "D3 - data bus bit 3 (6581 pin 18)"
+  uio[4]: "D4 - data bus bit 4 (6581 pin 19)"
+  uio[5]: "D5 - data bus bit 5 (6581 pin 20)"
+  uio[6]: "D6 - data bus bit 6 (6581 pin 21)"
+  uio[7]: "D7 - data bus bit 7 (6581 pin 22)"
+
+yaml_version: 6

@@ -1,0 +1,9 @@
+name: docs
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  docs:
+    uses: TinyTapeout/tt-gds-action/.github/workflows/docs.yaml@ttsky26d

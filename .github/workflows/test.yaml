@@ -1,0 +1,9 @@
+name: test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: TinyTapeout/tt-gds-action/.github/workflows/test.yaml@ttsky26d
