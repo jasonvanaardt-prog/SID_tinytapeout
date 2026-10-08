@@ -50,6 +50,32 @@ A 6x2 run was tried as a fallback and is *worse* on nearly every measure —
 13,317 cells, 240,901 µm of wire, 6 antenna-violating nets, slightly higher
 power — for twice the tiles. 4x2 at density 75 is the better build.
 
+### Why not 3x2, which would save €140
+
+3x2 is six tiles rather than eight, so at €70/tile it would save €140. It
+was evaluated properly rather than assumed impossible, and it *does* close:
+
+| | 4x2 @ 75 | 3x2 @ 85 |
+|---|---|---|
+| core utilisation | 56.3 % | **75.0 %** |
+| Magic DRC / LVS / route DRC | 0 / 0 / 0 | 0 / 0 / 0 |
+| setup / hold worst slack | +296.06 / +0.110 ns | +296.52 / +0.104 ns |
+| routing iterations to converge | **6** | **12** |
+| max-slew violations | 37 | **93** |
+| antenna-violating nets | 1 | **5** |
+
+So the hard gates pass. The margin indicators do not: two and a half times
+the slew violations, five times the antenna nets, and twice as many routing
+iterations. More tellingly, **3x2 at density 90 fails outright** — global
+routing hits congestion overflow and diode insertion then errors out. 3x2 at
+85 is sitting just short of a cliff.
+
+That matters because the local flow is OpenLane 2.0.11 while CI hardens with
+LibreLane 3.0.14. A build with this little headroom is exactly the kind that
+can tip over on a different tool version, and a failed harden costs a shuttle
+slot. **4x2 at 56 % utilisation is the build to submit**; the €140 is cheap
+insurance.
+
 ### Residual warnings, and why they are acceptable
 
 - **32–37 max-slew violations** in the slow corner (`nom_ss_100C_1v60`),
