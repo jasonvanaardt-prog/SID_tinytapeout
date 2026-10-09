@@ -87,7 +87,7 @@ The host-facing interface is the original chip's, with phi2 as the clock:
 | 15-22 | D0..D7 | `uio[0..7]` |
 | 9-13 | A0..A4 | `ui[0..4]` |
 | 8 | /CS | `ui[5]` |
-| 7 | R//W | `ui[6]` |
+| 7 | `R//W` | `ui[6]` |
 | 6 | phi2 | `clk` |
 | 5 | /RES | `rst_n` |
 | 26 | EXT IN | `ui[7]`, as a 1-bit stream |
