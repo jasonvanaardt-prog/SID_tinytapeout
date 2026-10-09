@@ -104,7 +104,7 @@ Reads need one thing spelled out. The data bus is driven whenever `/CS` is
 low and `R//W` is high, with no phi2 qualification of its own, because
 **`/CS` is expected to already be phi2-qualified** -- which it is on a
 C64, where the PLA only asserts the SID's `/CS` during phi2 high for an
-address in $D400-$D7FF. A microcontroller driving this tile must do the
+address in `$D400-$D7FF`. A microcontroller driving this tile must do the
 same and assert `/CS` only for the duration of an access, or it will find
 the tile driving the data bus outside the intended window.
 
